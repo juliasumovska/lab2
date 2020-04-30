@@ -1,5 +1,6 @@
 from spyre import server
 from bs4 import BeautifulSoup
+from sep import get_url
 import pandas as pd
 import json
 import requests
@@ -17,7 +18,7 @@ class WebApp(server.App):
 
     inputs = [
         {
-            "type": 'dropdown',
+            "type": 'checkboxgroup',
             "label": 'Take a TS',
             "options": [{"label": "VCI", "value": "VCI"},
                         {"label": "TCI", "value": "TCI"},
@@ -35,84 +36,102 @@ class WebApp(server.App):
         {
             "type": 'dropdown',
             "label": 'From year',
-            "options": [{"label": i,"value": i} for i in range(1981,2021)],
+            "options": [{"label": i,"value": i} for i in range(1982,2021)],
             "key": 'from_year',
-            "action_id": "update_data",
+            "action_id": "refresh",
         },
         {
             "type": 'dropdown',
             "label": 'To year',
-            "options": [{"label": i, "value": i} for i in range(1982, 2021)],
+            "options": [{"label": i, "value": i} for i in range(1983, 2021)],
             "key": 'to_year',
-            "action_id": "update_data",
+            "action_id": "refresh",
         },
         {
             "type": 'text',
             "label": 'To week',
             "value": '0',
             "key": 'to_week',
-            "action_id": "update_data",
+            "action_id": "refresh",
         },
         {
             "type": 'text',
             "label": 'To next week',
             "value": '52',
             "key": 'to_next',
-            "action_id": "update_data",
+            "action_id": "refresh",
         }
     ]
 
     controls = [{"type": "hidden",
                  "id": "update_data"}]
 
-    tabs = ["Plot", "Table"]
+    tabs = ["Plot", "Table","Plot2","Table2"]
 
     outputs = [{"type": "plot",
-                "id": "plot",
+                "id": "getPlot_whole",
                 "control_id": "update_data",
                 "tab": "Plot"},
-
+               {"type": "plot",
+                "id": "getPlot_grouped",
+                "control_id": "update_data",
+                "tab": "Plot2"},
                {"type": "table",
-                "id": "table_id",
+                "id": "getData_whole",
                 "control_id": "update_data",
                 "tab": "Table",
-                "on_page_load": True}]
+                "on_page_load": True},
+               {"type": "table",
+                "id": "getData_grouped",
+                "control_id": "update_data",
+                "tab": "Table2",
+                "on_page_load": True},
+               ]
 
-    def getData(self, params):
-        provinceID = params['Province']
-        from_year = params['from_year']
-        to_year = params['to_year']
-        week_form = params['to_week']
-        week_too = params['to_next']
-        api_url = "https://www.star.nesdis.noaa.gov/smcd/emb/vci/VH/get_TS_admin.php?country=UKR&provinceID={}&year1={}&year2={}&type=Mean".format(
-            provinceID, from_year, to_year)
-        vhiUrl = str(BeautifulSoup(requests.get(api_url).content.decode("utf8"),'html.parser').find('pre').contents[0])
-        normData = []
-        data = vhiUrl.split('\n')
+    def getData_whole(self, params):
 
-        for j in range(len(data)):
-            data[j] = re.sub(',', ' ', data[j])
-            data[j] = data[j].split(' ')
-            data[j] = list(filter(lambda x: x != '', data[j]))
-            data[j].insert(2, provinceID)
-            data[j][0:3] = list(map(int, data[j][0:3]))
-            data[j][3:] = list(map(float, data[j][3:]))
-            normData.append(data[j])
-        df = pd.DataFrame(normData, columns=['Year', 'Week', 'ProvinceID', 'SMN', 'SMT', 'VCI', 'TCI', 'VHI'])
-        df = df[~df.isin([-1])]
-        df = df.dropna()
-        return df.loc[(df['Week'] >= float(week_form)) & (df['Week'] <= float(week_too))]
+        provinceID = int(params['Province'])
+        from_year = int(params['from_year'])
+        to_year = int(params['to_year'])
+        week_form = int(params['to_week'])
+        week_too = int(params['to_next'])
+        df = get_url(provinceID,from_year,to_year,week_form,week_too)
+        return df
 
-
-
-    def getPlot(self, params):
+    def getPlot_whole(self, params):
         datatype = params['TS']
-        df = self.getData(params)
+        df = self.getData_whole(params)
         plt_obj = df.plot(x='Week', y=datatype)
         plt_obj.set_ylabel(datatype)
         fig = plt_obj.get_figure()
         return fig
 
+    def getData_grouped(self,params):
+        provinceID = int(params['Province'])
+        from_year = int(params['from_year'])
+        to_year = int(params['to_year'])
+        week_form = int(params['to_week'])
+        week_too = int(params['to_next'])
+        df2 = get_url(provinceID,from_year,to_year,week_form,week_too)
+        return df2[['Year','VHI']].groupby(['Year']).agg(['max','min']).reset_index()
+
+
+    def getPlot_grouped(self, params):
+        datatype = params['TS']
+        df = self.getData_grouped(params)
+
+        plt_obj = df.plot(x='Year',
+                          linestyle='-',
+                          linewidth=3
+
+                          )
+
+
+        fig = plt_obj.get_figure()
+        return fig
+
+
+
 
 app = WebApp()
-app.launch(port=8005)
+app.launch(port=8009)
